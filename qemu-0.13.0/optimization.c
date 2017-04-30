@@ -67,11 +67,10 @@ static inline void shack_init(CPUState *env)
 	DEBUG_XLONG(host_eip);
 	DEBUG_XLONG(*host_eip);
 
-	if(alloc_key_to_shadow_hash((list_t*)env->shadow_hash_list, guest_eip)) {
+	if(alloc_key_to_hash_list((list_t*)env->shadow_hash_list, guest_eip)) {
 		DEBUG("Key existed");
 
-		unsigned long* existed_value = get_key_value((list_t*)env->shadow_hash_list, guest_eip);
-		DEBUG_XLONG(existed_value);
+		DEBUG_XLONG(get_key_value((list_t*)env->shadow_hash_list, guest_eip));
 	}
 
 	if(put_key_value((list_t*)env->shadow_hash_list, guest_eip, host_eip)) {
@@ -154,7 +153,6 @@ void push_shack(CPUState *env, TCGv_ptr cpu_env, target_ulong next_eip)
 	TARGET_TRACE
 	// *_top_addr = _neip
 	tcg_gen_ld_tl(top_addr, cpu_env, offsetof(CPUState, shack_top));
-	//tcg_gen_qemu_st32(neip, top_addr, 0);
 	tcg_gen_st_tl(neip, top_addr, 0);
 
 	tcg_temp_free(neip);
@@ -207,7 +205,6 @@ void push_shack(CPUState *env, TCGv_ptr cpu_env, target_ulong next_eip)
 
 	TARGET_TRACE
 	// *target_top = _next_tip
-	//tcg_gen_qemu_st32(next_tip, ttop_addr, 0);
 	tcg_gen_st_tl(next_tip, ttop_addr, 0);
 	
 	tcg_temp_free(ttop_addr);
@@ -221,6 +218,7 @@ void push_shack(CPUState *env, TCGv_ptr cpu_env, target_ulong next_eip)
  *  Pop next host eip from shadow stack.
  * Called By: translate.c: op case[0xc2 ret imm16, 0xc3 ret]
  */
+//#define USE_HELPER
 void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 {
 	INF;
@@ -228,7 +226,8 @@ void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 	DEBUG_XLONG(next_eip);
 	DEBUG_UINT(optimization_ret_addr);
 
-	/*
+#ifdef USE_HELPER
+
 	TCGv_ptr host_eip = tcg_temp_local_new_ptr();
 	gen_helper_get_return(host_eip, cpu_env, next_eip);
 
@@ -240,10 +239,11 @@ void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 
     tcg_temp_free_ptr(host_eip);
     gen_set_label(end_label);
-    */
+
+#else
 
     TARGET_TRACE
-	// _next_eip_local = *_top
+	// _next_eip_local = *_next_eip
 	TCGv next_eip_local = tcg_temp_local_new();
 	tcg_gen_mov_tl(next_eip_local, next_eip);
 	GENHELPER2(print_linereg, tcg_const_tl(__LINE__), next_eip_local);
@@ -328,7 +328,7 @@ void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 	tcg_temp_free(offset);
 
 	TARGET_TRACE
-	// _target_addr = *_ttop_target
+	// _target_addr = *ret_addr
 	TCGv target_addr = tcg_temp_local_new();
 	tcg_gen_ld_tl(target_addr, ret_addr, 0);
 	tcg_gen_brcond_tl(TCG_COND_EQ, target_addr, tcg_const_tl(0), end_label);
@@ -357,6 +357,8 @@ void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 
 	// label .end
 	gen_set_label(end_label);
+
+#endif
 
 	RET;
 }
@@ -404,7 +406,6 @@ __thread int update_ibtc;
  *  Look up IBTC. Return next host eip if cache hit or
  *  back-to-dispatcher stub address if cache miss.
  */
-//#define NO_DEBUG
 void *helper_lookup_ibtc(target_ulong guest_eip)
 {
 	INF;
@@ -422,7 +423,7 @@ void *helper_lookup_ibtc(target_ulong guest_eip)
 		RETURN(optimization_ret_addr);
 	}
 }
-//#undef NO_DEBUG
+
 /*
  * update_ibtc_entry()
  *  Populate eip and tb pair in IBTC entry.
@@ -439,12 +440,6 @@ void update_ibtc_entry(TranslationBlock *tb)
 	DEBUG_UINT(optimization_ret_addr);
 
 	update_ibtc = 0;
-
-	/*target_ulong guest_eip = tb->pc;
-	unsigned int index = guest_eip % IBTC_CACHE_SIZE;
-	struct jmp_pair* jp = &ibtc.htable[index];
-	jp->guest_eip = tb->pc;
-	jp->tb = tb;*/
 
 	set_ibtc_cache(&ibtc, tb->pc, tb);
 
@@ -485,9 +480,8 @@ int init_optimizations(CPUState *env)
  */
 
 
-inline int alloc_key_to_shadow_hash(list_t* hash, unsigned long key) 
+inline int alloc_key_to_hash_list(list_t* hash, unsigned long key) 
 { 
-	
 	unsigned int hashedNum = key % HASH_INDEX_SIZE;	
 	list_t* hash_header = hash + hashedNum;
 	
@@ -555,7 +549,7 @@ inline int put_key_value(list_t* hash, unsigned long key, unsigned long* value)
 
 inline unsigned long** get_key_location(list_t* hash, unsigned long key) 
 {
-	alloc_key_to_shadow_hash(hash, key);
+	alloc_key_to_hash_list(hash, key);
 
 	unsigned int hashedNum = key % HASH_INDEX_SIZE;	
 	list_t* hash_header = hash + hashedNum;

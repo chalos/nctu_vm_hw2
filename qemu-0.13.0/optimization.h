@@ -21,7 +21,7 @@ static const int OK = 0;
 static const int KEY_EXIST = 1;
 static const int KEY_NOT_EXIST = 2;
 static const int ALLOC_ERR = 3;
-inline int alloc_key_to_shadow_hash(list_t* hash, unsigned long key);
+inline int alloc_key_to_hash_list(list_t* hash, unsigned long key);
 inline int put_key_value(list_t* hash, unsigned long key, unsigned long* value);
 inline unsigned long* get_key_value(list_t* hash, unsigned long key);
 inline unsigned long** get_key_location(list_t* hash, unsigned long key);
